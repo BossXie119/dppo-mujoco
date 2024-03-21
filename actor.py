@@ -23,7 +23,7 @@ from mem_pool import MemPool
 from pyarrow import serialize
 
 parser = ArgumentParser()
-parser.add_argument('--alg', type=str, default='dppo-mujoco-rate-return-ACTOR1', help='The RL algorithm')
+parser.add_argument('--alg', type=str, default='dppo-mujoco-rate-return-change-training-ACTOR1', help='The RL algorithm')
 parser.add_argument('--exp', type=str, default='rate-return-index', help='The explanation of this experiment')
 parser.add_argument('--env_id', type=str, default='HalfCheetah-v4', help='The game environment')
 parser.add_argument('--num_steps', type=int, default=1000000, help='The number of total training steps')
