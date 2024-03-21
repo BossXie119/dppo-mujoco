@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from mem_pool import MemPoolManager, MultiprocessingMemPool
 
 parser = ArgumentParser()
-parser.add_argument('--alg', type=str, default='dppo-mujoco-rate-return-actor1', help='The RL algorithm')
+parser.add_argument('--alg', type=str, default='dppo-mujoco-rate-return-change-training-actor1', help='The RL algorithm')
 parser.add_argument('--seed', type=int, default=1, help='seed of the experiment')
 parser.add_argument('--cuda', type=bool, default=True, help='if toggled, cuda will be enabled by default')
 parser.add_argument('--torch_deterministic', type=bool, default=True, help='if toggled, `torch.backends.cudnn.deterministic=False')
@@ -49,61 +49,74 @@ parser.add_argument('--update_step', type=int, default=0, help='The number of up
 parser.add_argument('--num_steps', type=int, default=1000000, help='The number of num_steps')
 parser.add_argument('--num_iterations', type=int, default=0, help='The number of num_iterations')
 parser.add_argument('--target_kl', type=float, default=None, help='the target KL divergence threshold')
+parser.add_argument('--num_minibatches', type=int, default=32, help='The number of mini-batches')
+parser.add_argument('--minibatch_size', type=int, default=0, help='The mini-batch size (computed in runtime)')
+
 
 def learn(args, agent, optimizer,training_data, device, writer):
-    clipfracs = []
-    args.update_step = args.update_step + 1
+
     # Annealing the rate
+    args.update_step = args.update_step + 1
     frac = 1.0 - (args.update_step - 1.0) / args.num_iterations
     lrnow = frac * args.learning_rate
     optimizer.param_groups[0]["lr"] = lrnow
+
+    # Training data
+    states = torch.Tensor(training_data['state']).to(device)
+    actions = torch.Tensor(training_data['action']).to(device)
+    returns = training_data['return'].copy()
+    returns = torch.Tensor(returns).to(device)
+    logprobs = torch.Tensor(training_data['act_prob']).to(device)
+    advantages = training_data['advantage'].copy()
+    advantages = torch.Tensor(advantages).to(device)
+    values = torch.Tensor(training_data['value']).to(device)
+
+    b_inds = np.arange(args.batch_size)
+    clipfracs = []
     # Updata for update_epochs
     for _ in range(args.update_epochs):
-        # Transfrom to tensor
-        states = torch.Tensor(training_data['state']).to(device)
-        actions = torch.Tensor(training_data['action']).to(device)
-        returns = training_data['return'].copy()
-        returns = torch.Tensor(returns).to(device)
-        logprobs = torch.Tensor(training_data['act_prob']).to(device)
-        advantages = training_data['advantage'].copy()
-        advantages = torch.Tensor(advantages).to(device)
-        values = torch.Tensor(training_data['value']).to(device)
+        np.random.shuffle(b_inds)
+        for start in range(0, args.batch_size, args.minibatch_size):
+            end = start + args.minibatch_size
+            mb_inds = b_inds[start:end]
 
-        _, newlogprob, entropy, newvalue = agent.get_action_and_value(states, actions)
-        logratio = newlogprob - logprobs
-        ratio = logratio.exp()
+            _, newlogprob, entropy, newvalue = agent.get_action_and_value(states[mb_inds], actions[mb_inds])
+            logratio = newlogprob - logprobs[mb_inds]
+            ratio = logratio.exp()
 
-        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-        old_approx_kl = (-logratio).mean()
-        approx_kl = ((ratio - 1) - logratio).mean()
-        clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+            with torch.no_grad():
+                # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                old_approx_kl = (-logratio).mean()
+                approx_kl = ((ratio - 1) - logratio).mean()
+                clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
 
-        # Policy loss
-        pg_loss1 = -advantages * ratio
-        pg_loss2 = -advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-            # Value loss
-        newvalue = newvalue.view(-1)
-        if args.clip_vloss:
-            v_loss_unclipped = (newvalue - returns) ** 2
-            v_clipped = values + torch.clamp(
-                newvalue - values,
-                -args.clip_coef,
-                args.clip_coef,
-            )
-            v_loss_clipped = (v_clipped - returns) ** 2
-            v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-            v_loss = 0.5 * v_loss_max.mean()
-        else:
-            v_loss = 0.5 * ((newvalue - returns) ** 2).mean()
-        # Entropy
-        entropy_loss = entropy.mean()
-        loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-        # Optimizer
-        optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-        optimizer.step()
+            mb_advantages = advantages[mb_inds]
+            # Policy loss
+            pg_loss1 = -mb_advantages * ratio
+            pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+            pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                # Value loss
+            newvalue = newvalue.view(-1)
+            if args.clip_vloss:
+                v_loss_unclipped = (newvalue - returns[mb_inds]) ** 2
+                v_clipped = values[mb_inds] + torch.clamp(
+                    newvalue - values[mb_inds],
+                    -args.clip_coef,
+                    args.clip_coef,
+                )
+                v_loss_clipped = (v_clipped - returns[mb_inds]) ** 2
+                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                v_loss = 0.5 * v_loss_max.mean()
+            else:
+                v_loss = 0.5 * ((newvalue - returns[mb_inds]) ** 2).mean()
+            # Entropy
+            entropy_loss = entropy.mean()
+            loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+            # Optimizer
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+            optimizer.step()
 
     print("Loss:", loss.item())
     writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], args.update_step)
@@ -124,6 +137,7 @@ def main():
     args.batch_size = int(args.num_actors * 2048)
     args.training_freq = args.num_actors
     args.num_iterations = int(args.num_steps // 2048)
+    args.minibatch_size = int(args.batch_size // args.num_minibatches)
 
     run_name = f"{args.env_id}__{args.alg}__{args.num_actors}__{args.seed}__{int(time.time())}"
     writer = SummaryWriter(f"LEARNER/runs/{run_name}")
@@ -176,6 +190,7 @@ def main():
                 receiving_condition.wait()
             data = mem_pool.sample(size=args.batch_size)
             num_receptions.value -= args.training_freq
+            # mem_pool.clear()
         # Training
         learn(args, agent, optimizer, data, device, writer)
 
