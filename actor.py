@@ -23,7 +23,7 @@ from mem_pool import MemPool
 from pyarrow import serialize
 
 parser = ArgumentParser()
-parser.add_argument('--alg', type=str, default='dppo-mujoco-rate-return-change-training-ACTOR1', help='The RL algorithm')
+parser.add_argument('--alg', type=str, default='dppo-mujoco-actor1', help='The RL algorithm')
 parser.add_argument('--exp', type=str, default='rate-return-index', help='The explanation of this experiment')
 parser.add_argument('--env_id', type=str, default='HalfCheetah-v4', help='The game environment')
 parser.add_argument('--num_steps', type=int, default=1000000, help='The number of total training steps')
@@ -52,7 +52,7 @@ def run_one_agent(args, actor_status):
 
     if args.index == 1:
         run_name = f"{args.env_id}__{args.alg}__{args.seed}__{int(time.time())}"
-        writering = SummaryWriter(f"ACTOR/runs/{run_name}")
+        writering = SummaryWriter(f"ACTOR1/runs/{run_name}")
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -60,7 +60,8 @@ def run_one_agent(args, actor_status):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Init envs and agent
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.gamma) for i in range(args.num_envs)],
@@ -111,9 +112,10 @@ def run_one_agent(args, actor_status):
             for info in infos["final_info"]:
                 if info and "episode" in info:
                     print(f"global_step={step}, episodic_return={info['episode']['r']}")
-                    # print(f"global_step={step}, episodic_length={info['episode']['l']}")
+                    print(f"global_step={step}, episodic_length={info['episode']['l']}")
                     if args.index == 1:
                         writering.add_scalar("charts/episodic_return", info["episode"]["r"], step)
+                        writering.add_scalar("charts/episodic_length", info["episode"]["l"], step)
         is_terminal = done or episode_lengths[-1] >= args.max_episode_length > 0
         if is_terminal or len(mem_pool) + len(transitions) >= args.max_steps_per_update:
             # Current episode is terminated or a trajectory of enough training data is collected
@@ -136,6 +138,7 @@ def run_one_agent(args, actor_status):
         if len(mem_pool) >= args.max_steps_per_update:
             # Send training data after enough training data (>= 'arg.max_steps_per_update') is collected
             post_processed_data = post_process_training_data(training_data = mem_pool.sample())
+            # post_processed_data = mem_pool.sample()
             # Serialize a general Python sequence for transient storage and transport
             socket.send(serialize(post_processed_data).to_buffer())
             socket.recv()

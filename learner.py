@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from mem_pool import MemPoolManager, MultiprocessingMemPool
 
 parser = ArgumentParser()
-parser.add_argument('--alg', type=str, default='dppo-mujoco-rate-return-change-training-actor1', help='The RL algorithm')
+parser.add_argument('--alg', type=str, default='dppo-mujoco-actor1', help='The RL algorithm')
 parser.add_argument('--seed', type=int, default=1, help='seed of the experiment')
 parser.add_argument('--cuda', type=bool, default=True, help='if toggled, cuda will be enabled by default')
 parser.add_argument('--torch_deterministic', type=bool, default=True, help='if toggled, `torch.backends.cudnn.deterministic=False')
@@ -57,7 +57,7 @@ def learn(args, agent, optimizer,training_data, device, writer):
 
     # Annealing the rate
     args.update_step = args.update_step + 1
-    frac = 1.0 - (args.update_step - 1.0) / args.num_iterations
+    frac = 1.0 - (args.update_step - 1.0) / (args.num_iterations - 1.0)
     lrnow = frac * args.learning_rate
     optimizer.param_groups[0]["lr"] = lrnow
 
@@ -70,6 +70,9 @@ def learn(args, agent, optimizer,training_data, device, writer):
     advantages = training_data['advantage'].copy()
     advantages = torch.Tensor(advantages).to(device)
     values = torch.Tensor(training_data['value']).to(device)
+
+    # Advantage-normalization
+    # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     b_inds = np.arange(args.batch_size)
     clipfracs = []
@@ -117,6 +120,10 @@ def learn(args, agent, optimizer,training_data, device, writer):
             loss.backward()
             nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
             optimizer.step()
+        
+        if args.target_kl is not None and approx_kl > args.target_kl:
+                break
+
 
     print("Loss:", loss.item())
     writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], args.update_step)
@@ -135,12 +142,12 @@ def main():
 
     args.pool_size = int(args.num_actors * 2048)
     args.batch_size = int(args.num_actors * 2048)
-    args.training_freq = args.num_actors
+    args.training_freq = int(args.num_actors)
     args.num_iterations = int(args.num_steps // 2048)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
 
     run_name = f"{args.env_id}__{args.alg}__{args.num_actors}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"LEARNER/runs/{run_name}")
+    writer = SummaryWriter(f"LEARNER1/runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
