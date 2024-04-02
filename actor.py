@@ -23,9 +23,10 @@ from mem_pool import MemPool
 from pyarrow import serialize
 
 parser = ArgumentParser()
-parser.add_argument('--alg', type=str, default='dppo-mujoco-actor1', help='The RL algorithm')
+parser.add_argument('--alg', type=str, default='dppo-mujoco', help='The RL algorithm')
 parser.add_argument('--exp', type=str, default='rate-return-index', help='The explanation of this experiment')
 parser.add_argument('--env_id', type=str, default='HalfCheetah-v4', help='The game environment')
+parser.add_argument('--num_actor', type=str, default='actor1', help='The game environment')
 parser.add_argument('--num_steps', type=int, default=1000000, help='The number of total training steps')
 parser.add_argument('--ip', type=str, default='localhost', help='IP address of learner server')
 parser.add_argument('--data_port', type=int, default=5000, help='Learner server port to send training data')
@@ -34,8 +35,8 @@ parser.add_argument('--seed', type=int, default=1, help='seed of the experiment'
 parser.add_argument('--torch_deterministic', type=bool, default=True, help='if toggled, `torch.backends.cudnn.deterministic=False')
 parser.add_argument('--max_steps_per_update', type=int, default=2048,
                     help='The maximum number of steps between each update')
-parser.add_argument('--exp_path', type=str, default='/ACTOR',
-                    help='Directory to save logging data, model parameters and config file')
+parser.add_argument('--data_path', type=str, default='DATA1',help='Directory to save logging data')
+parser.add_argument('--pth_path', type=str, default='/PTH',help='Directory model parameters and config file')
 parser.add_argument('--num_saved_pth', type=int, default=5, help='Number of recent checkpoint files to be saved')
 parser.add_argument('--max_episode_length', type=int, default=1000, help='Maximum length of trajectory')
 parser.add_argument('--num_envs', type=int, default=1, help='the number of parallel game environments')
@@ -51,8 +52,8 @@ def run_one_agent(args, actor_status):
     socket.connect(f'tcp://{args.ip}:{args.data_port}')
 
     if args.index == 1:
-        run_name = f"{args.env_id}__{args.alg}__{args.seed}__{int(time.time())}"
-        writering = SummaryWriter(f"ACTOR1/runs/{run_name}")
+        run_name = f"{args.env_id}__{args.alg}__{args.num_actor}__{args.seed}__{int(time.time())}"
+        writering = SummaryWriter(f"ACTOR3/runs/{run_name}")
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -60,31 +61,32 @@ def run_one_agent(args, actor_status):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cpu")
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #device = torch.device("cpu")
+    model_id = -1
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Init envs and agent
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.gamma) for i in range(args.num_envs)],
     )
     agent = Agent(envs).to(device)
 
-    # while True:
-    #     new_weights, model_id = find_new_weights(model_id, args.pth_path)
-    #     if new_weights is not None:
-    #         equal = all(torch.equal(agent.state_dict()[key], new_weights[key]) for key in new_weights.keys())
-    #         print(equal)
-    #         agent.load_state_dict(new_weights)
-    #         break
+    while True:
+        new_weights, model_id = find_new_weights(model_id, args.pth_path)
+        if new_weights is not None:
+            equal = all(torch.equal(agent.state_dict()[key], new_weights[key]) for key in new_weights.keys())
+            print(equal)
+            agent.load_state_dict(new_weights)
+            break
             
     # Set logging path
-    logger.configure(str(args.log_path))
+    if args.index ==1:
+        logger.configure(str(args.log_path))
 
     # A list to store raw transitions within an episode
     transitions = []  
     # A pool to store prepared training data
     mem_pool = MemPool()  
 
-    model_id = -1
     episode_rewards = [0.0]
     episode_lengths = [0]
     num_episodes = 0
@@ -92,12 +94,13 @@ def run_one_agent(args, actor_status):
     mean_10ep_length = 0
     send_time_start = time.time()
 
-    state, _ = envs.reset(seed=args.seed)
+    state, _ = envs.reset(seed=(args.index + args.seed))
     state = torch.Tensor(state).to(device)
 
     for step in range(args.num_steps):
         # Sample action
-        action, logprob, _, value = agent.get_action_and_value(state)
+        with torch.no_grad():
+            action, logprob, _, value = agent.get_action_and_value(state)
         # Next step
         next_state, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
         done = np.logical_or(terminations, truncations)
@@ -111,11 +114,16 @@ def run_one_agent(args, actor_status):
         if "final_info" in infos:
             for info in infos["final_info"]:
                 if info and "episode" in info:
-                    print(f"global_step={step}, episodic_return={info['episode']['r']}")
-                    print(f"global_step={step}, episodic_length={info['episode']['l']}")
-                    if args.index == 1:
+                    if args.index == 1 and step % 10 == 0:
                         writering.add_scalar("charts/episodic_return", info["episode"]["r"], step)
                         writering.add_scalar("charts/episodic_length", info["episode"]["l"], step)
+                        logger.record_tabular("Epoch", step)
+                        logger.record_tabular("AverageEpRet", info["episode"]["r"][0])
+                        logger.dump_tabular()
+                    else:
+                        print(f"global_step={step}, episodic_return={info['episode']['r']}")
+                        print(f"global_step={step}, episodic_length={info['episode']['l']}")
+
         is_terminal = done or episode_lengths[-1] >= args.max_episode_length > 0
         if is_terminal or len(mem_pool) + len(transitions) >= args.max_steps_per_update:
             # Current episode is terminated or a trajectory of enough training data is collected
@@ -128,11 +136,11 @@ def run_one_agent(args, actor_status):
                 num_episodes = len(episode_rewards)
                 mean_10ep_reward = round(np.mean(episode_rewards[-10:]), 2)
                 mean_10ep_length = round(np.mean(episode_lengths[-10:]), 2)
-                print(episode_rewards[-1])
+                # print(episode_rewards[-1])
                 episode_rewards.append(0.0)
                 episode_lengths.append(0)
 
-                state, _ = envs.reset(seed=args.seed)
+                state, _ = envs.reset(seed=(args.index + args.seed))
                 state = torch.Tensor(state).to(device)
         
         if len(mem_pool) >= args.max_steps_per_update:
@@ -276,11 +284,12 @@ def main():
     args, _ = parser.parse_known_args()
 
     args.index = int(args.index)
-    args.exp_path = Path(args.exp_path)
-    args.pth_path = args.exp_path / 'pth'
-    args.log_path = args.exp_path / 'log'
-    args.exp_path.mkdir(exist_ok=True)
-    args.pth_path.mkdir(parents=True, exist_ok=True)
+    args.data_path = Path(args.env_id)
+    args.pth_path = Path(args.pth_path)
+    path = args.num_actor + "-" + str(args.seed)
+    args.log_path = args.data_path / args.num_actor / path
+    args.data_path.mkdir(exist_ok=True)
+    args.pth_path.mkdir(exist_ok=True)
     args.log_path.mkdir(parents=True, exist_ok=True)
 
     # Running status of actor

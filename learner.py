@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from mem_pool import MemPoolManager, MultiprocessingMemPool
 
 parser = ArgumentParser()
-parser.add_argument('--alg', type=str, default='dppo-mujoco-actor1', help='The RL algorithm')
+parser.add_argument('--alg', type=str, default='dppo-mujoco', help='The RL algorithm')
 parser.add_argument('--seed', type=int, default=1, help='seed of the experiment')
 parser.add_argument('--cuda', type=bool, default=True, help='if toggled, cuda will be enabled by default')
 parser.add_argument('--torch_deterministic', type=bool, default=True, help='if toggled, `torch.backends.cudnn.deterministic=False')
@@ -147,7 +147,7 @@ def main():
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
 
     run_name = f"{args.env_id}__{args.alg}__{args.num_actors}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"LEARNER1/runs/{run_name}")
+    writer = SummaryWriter(f"LEARNER3/runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -173,7 +173,7 @@ def main():
     )
     agent = Agent(envs).to(device)
 
-    # weights_socket.send(pickle.dumps(agent.state_dict()))
+    weights_socket.send(pickle.dumps(agent.state_dict()))
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Variables to control the frequency of training
