@@ -148,21 +148,28 @@ class TensorBoardOutputFormat:
     """
 
     def __init__(self, dir):
-        os.makedirs(dir, exist_ok=True)
-        self.dir = dir
-        self.step = 1
-        from torch.utils.tensorboard import SummaryWriter
-        self.writer = SummaryWriter(dir)
+        pass
+    #     os.makedirs(dir, exist_ok=True)
+    #     self.dir = dir
+    #     self.step = 1
+    #     from torch.utils.tensorboard import SummaryWriter
+    #     self.writer = SummaryWriter(dir)
+    # def __init__(self, dir):
+    #     os.makedirs(dir, exist_ok=True)
+    #     self.dir = dir
+    #     self.step = 1
+    #     from torch.utils.tensorboard import SummaryWriter
+    #     self.writer = SummaryWriter(dir)
 
-    def writekvs(self, kvs):
-        for k, v in kvs.items():
-            self.writer.add_scalar(k, v, self.step)
-        self.step += 1
+    # def writekvs(self, kvs):
+    #     for k, v in kvs.items():
+    #         self.writer.add_scalar(k, v, self.step)
+    #     self.step += 1
 
-    def close(self):
-        if self.writer:
-            self.writer.close()
-            self.writer = None
+    # def close(self):
+    #     if self.writer:
+    #         self.writer.close()
+    #         self.writer = None
     
 # class TensorBoardOutputFormat(KVWriter):
 #     """

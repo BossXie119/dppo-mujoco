@@ -147,7 +147,7 @@ def main():
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
 
     run_name = f"{args.env_id}__{args.alg}__{args.num_actors}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"LEARNER3/runs/{run_name}")
+    writer = SummaryWriter(f"LEARNER/runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),

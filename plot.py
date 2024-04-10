@@ -5,6 +5,9 @@ import json
 import os
 import os.path as osp
 import numpy as np
+from matplotlib.ticker import EngFormatter
+import matplotlib.ticker as ticker
+from matplotlib.font_manager import FontProperties
 
 DIV_LINE_WIDTH = 50
 
@@ -41,8 +44,8 @@ def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1",
     Changes the colorscheme and the default legend style, though.
     """
     # plt.legend(loc='best').set_draggable(True)
-    plt.legend(loc='upper center', ncol=3, handlelength=1,
-              borderaxespad=0., prop={'size': 13})
+    plt.legend(loc='upper center', ncol=6, handlelength=1,
+                borderaxespad=0, prop={'size': 13})
 
     """
     For the version of the legend used in the Spinning Up benchmarking page, 
@@ -158,14 +161,26 @@ def make_plots(all_logdirs, legend=None, xaxis=None, values=None, count=False,
     data = get_all_datasets(all_logdirs, legend, select, exclude)
     values = values if isinstance(values, list) else [values]
     condition = 'Condition2' if count else 'Condition1'
-    estimator = getattr(np, estimator) 
-    # plt.rcParams['font.sans-serif'] = ['Simhei']  #显示中文
-    # plt.rcParams['axes.unicode_minus'] = False     
+    estimator = getattr(np, estimator)     
     # choose what to show on main curve: mean? max? min?
     for value in values:
-        plt.figure()
+        # plt.figure()
+        sns.set_theme(style="darkgrid", font_scale=1.8)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6.4*1.5, 4.8*1.5))
         plot_data(data, xaxis=xaxis, value=value, condition=condition, smooth=smooth, estimator=estimator)
-    plt.savefig('./test2.jpg')
+
+    font = FontProperties(fname='/usr/share/fonts/SimSun.ttf',size=20)
+    ax.set_xlabel('百万步', labelpad=10,fontproperties=font)
+    ax.set_ylabel('每局平均累计奖励', labelpad=10,fontproperties=font)
+    def mappingx(x, pos): return (x / 1e6)
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(mappingx))
+    ax.legend(loc='best')
+    # ax.set(ylim=(0, 0.03))
+    ax.autoscale()
+    # plt.title("Ant-v4")
+    # plt.gcf().set_size_inches(10, 10)
+    # plt.gcf().set_figheight(6)
+    plt.savefig('./hf4.jpg')
     plt.show()
 
 

@@ -13,6 +13,7 @@ import numpy as np
 
 from env import make_env
 from torch.utils.tensorboard import SummaryWriter
+from collections import deque
 from multiprocessing import Array
 from pathlib import Path
 from itertools import count
@@ -36,6 +37,7 @@ parser.add_argument('--torch_deterministic', type=bool, default=True, help='if t
 parser.add_argument('--max_steps_per_update', type=int, default=2048,
                     help='The maximum number of steps between each update')
 parser.add_argument('--data_path', type=str, default='DATA1',help='Directory to save logging data')
+parser.add_argument('--else_data_path', type=str, default='/DATA1',help='Directory to save logging data')
 parser.add_argument('--pth_path', type=str, default='/PTH',help='Directory model parameters and config file')
 parser.add_argument('--num_saved_pth', type=int, default=5, help='Number of recent checkpoint files to be saved')
 parser.add_argument('--max_episode_length', type=int, default=1000, help='Maximum length of trajectory')
@@ -54,6 +56,13 @@ def run_one_agent(args, actor_status):
     if args.index == 1:
         run_name = f"{args.env_id}__{args.alg}__{args.num_actor}__{args.seed}__{int(time.time())}"
         writering = SummaryWriter(f"ACTOR3/runs/{run_name}")
+    else:
+        run_name = f"{args.env_id}__{args.alg}__{args.num_actor}__{args.seed}__{int(time.time())}"
+        writering = SummaryWriter(f"/ACTOR3/runs/{run_name}")
+
+    # if args.index == 1 or args.index == 8 or args.index == 12 or args.index ==20:
+    #     run_name = f"{args.env_id}__{args.alg}__{args.num_actor}__{args.seed}__{args.index}__{int(time.time())}"
+    #     writering = SummaryWriter(f"ACTOR/runs/{run_name}")
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -79,8 +88,11 @@ def run_one_agent(args, actor_status):
             break
             
     # Set logging path
-    if args.index ==1:
-        logger.configure(str(args.log_path))
+    # if args.index == 2:
+    # # if args.index == 1 or args.index == 8 or args.index == 12 or args.index ==20:
+    #     logger.configure(str(args.log_path))
+
+    logger.configure(str(args.log_path))
 
     # A list to store raw transitions within an episode
     transitions = []  
@@ -89,9 +101,8 @@ def run_one_agent(args, actor_status):
 
     episode_rewards = [0.0]
     episode_lengths = [0]
-    num_episodes = 0
-    mean_10ep_reward = 0
-    mean_10ep_length = 0
+    ep10_reward = deque(maxlen=10)
+
     send_time_start = time.time()
 
     state, _ = envs.reset(seed=(args.index + args.seed))
@@ -114,15 +125,27 @@ def run_one_agent(args, actor_status):
         if "final_info" in infos:
             for info in infos["final_info"]:
                 if info and "episode" in info:
-                    if args.index == 1 and step % 10 == 0:
-                        writering.add_scalar("charts/episodic_return", info["episode"]["r"], step)
-                        writering.add_scalar("charts/episodic_length", info["episode"]["l"], step)
-                        logger.record_tabular("Epoch", step)
-                        logger.record_tabular("AverageEpRet", info["episode"]["r"][0])
-                        logger.dump_tabular()
-                    else:
-                        print(f"global_step={step}, episodic_return={info['episode']['r']}")
-                        print(f"global_step={step}, episodic_length={info['episode']['l']}")
+                    # if args.index == 1:
+                    # # if args.index == 1 or args.index == 8 or args.index == 12 or args.index ==20:
+                    #     writering.add_scalar("charts/episodic_return", info["episode"]["r"], step)
+                    #     writering.add_scalar("charts/episodic_length", info["episode"]["l"], step)
+
+                    #     # log return
+                    #     print(f"global_step={step}, episodic_return={info['episode']['r']}")
+                    #     ep10_reward.append(info["episode"]["r"][0])
+                    #     # logger.record_tabular("Epoch", step)
+                    #     # logger.record_tabular("AverageEpRet", info["episode"]["r"][0])
+                    #     # logger.dump_tabular()
+                    # else:
+                    #     ep10_reward.append(info["episode"]["r"][0])
+                    #     print(f"global_step={step}, episodic_return={info['episode']['r']}")
+                    #     print(f"global_step={step}, episodic_length={info['episode']['l']}")
+                    writering.add_scalar("charts/episodic_return", info["episode"]["r"], step)
+                    writering.add_scalar("charts/episodic_length", info["episode"]["l"], step)
+                    print(f"global_step={step}, episodic_return={info['episode']['r']}")
+                    print(f"global_step={step}, episodic_length={info['episode']['l']}")
+                    ep10_reward.append(info["episode"]["r"][0])
+
 
         is_terminal = done or episode_lengths[-1] >= args.max_episode_length > 0
         if is_terminal or len(mem_pool) + len(transitions) >= args.max_steps_per_update:
@@ -133,9 +156,9 @@ def run_one_agent(args, actor_status):
 
             if is_terminal:
                 # Log information at the end of episode
-                num_episodes = len(episode_rewards)
-                mean_10ep_reward = round(np.mean(episode_rewards[-10:]), 2)
-                mean_10ep_length = round(np.mean(episode_lengths[-10:]), 2)
+                # num_episodes = len(episode_rewards)
+                # mean_10ep_reward = round(np.mean(episode_rewards[-10:]), 2)
+                # mean_10ep_length = round(np.mean(episode_lengths[-10:]), 2)
                 # print(episode_rewards[-1])
                 episode_rewards.append(0.0)
                 episode_lengths.append(0)
@@ -155,8 +178,23 @@ def run_one_agent(args, actor_status):
             send_data_interval = time.time() - send_time_start
             send_time_start = time.time()
 
-            print(f"current_iteration={(step + 1) // args.max_steps_per_update}, collection_time={send_data_interval}")
+            
+            print("最后10次return:", ep10_reward)
+            mean_10ep_reward = sum(ep10_reward) / len(ep10_reward)
+            # if args.index == 2:
+            # # if args.index == 1 or args.index == 8 or args.index == 12 or args.index ==20 and len(ep10_reward) > 0:
+            #     logger.record_tabular("Epoch", (step + 1))
+            #     logger.record_tabular("AverageEpRet", mean_10ep_reward)
+            #     logger.dump_tabular()
+            # else:
+            #     print("最后10次return的平均:", mean_10ep_reward)
+            logger.record_tabular("Epoch", (step + 1))
+            logger.record_tabular("AverageEpRet", mean_10ep_reward)
+            logger.dump_tabular()
+            # if args.index != 1:
+            #     time.sleep(0.03)
 
+            print(f"current_iteration={(step + 1) // args.max_steps_per_update}, collection_time={send_data_interval}")
             # if num_episodes > 0:
             #     # Log information
             #     logger.record_tabular("iteration", (step + 1) // args.max_steps_per_update)
@@ -286,11 +324,22 @@ def main():
     args.index = int(args.index)
     args.data_path = Path(args.env_id)
     args.pth_path = Path(args.pth_path)
+    args.else_data_path = Path(args.else_data_path)
     path = args.num_actor + "-" + str(args.seed)
-    args.log_path = args.data_path / args.num_actor / path
+    if args.index == 1:
+        args.log_path = args.data_path / args.num_actor / path
+    else:
+        args.log_path = args.else_data_path / args.num_actor / path
     args.data_path.mkdir(exist_ok=True)
+    args.else_data_path.mkdir(exist_ok=True)
     args.pth_path.mkdir(exist_ok=True)
     args.log_path.mkdir(parents=True, exist_ok=True)
+
+    # if args.index == 1 or args.index == 8 or args.index == 12 or args.index ==20:
+    #     path = args.num_actor + "-" + str(args.seed) + "-" + str(args.index)
+    #     args.log_path = args.data_path / args.num_actor / path
+    #     args.data_path.mkdir(exist_ok=True)
+    #     args.log_path.mkdir(parents=True, exist_ok=True)
 
     # Running status of actor
     actor_status = Array('i', [0])
